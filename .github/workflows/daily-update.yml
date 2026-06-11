@@ -1,0 +1,46 @@
+name: Daily WC2026 Stats Update
+
+on:
+  # Runs every day at 07:00 UTC = 5:00pm AEST (UTC+10)
+  # During daylight saving (AEDT, UTC+11) this becomes 6:00pm — adjust to 06:00 UTC if preferred
+  schedule:
+    - cron: '0 7 * * *'
+
+  # Also allows manual trigger from the GitHub Actions tab
+  workflow_dispatch:
+
+jobs:
+  update-stats:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run stats update
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npm run update
+
+      - name: Trigger Vercel redeploy
+        env:
+          VERCEL_DEPLOY_HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK }}
+        run: |
+          if [ -n "$VERCEL_DEPLOY_HOOK" ]; then
+            curl -X POST "$VERCEL_DEPLOY_HOOK"
+            echo "✅ Vercel redeploy triggered"
+          else
+            echo "ℹ️  No deploy hook set — Vercel will serve fresh data on next request via ISR"
+          fi
