@@ -3,6 +3,7 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const WebSocket = require('ws');
 globalThis.WebSocket = WebSocket;
+
 /**
  * WC2026 Sweepstakes — Daily Update Script
  * =========================================
@@ -74,12 +75,14 @@ Rules:
 - "gf" = goals for total, "ga" = goals against total, "gd" = gf minus ga
 - "score" = "X-Y" string for played matches (team's goals first), null for upcoming
 - "upcoming" = true if the match hasn't been played yet
-- Include all group stage matches plus any knockout matches played
+- "time" = the kickoff time converted to AEST (UTC+10), formatted like "5:00 AM AEST" or "11:00 AM AEST"
 - "eliminated" = true only if the team has been mathematically knocked out of the tournament (lost in knockout stage, or cannot qualify from group stage). Otherwise false, even if they've lost a group match.
 - "round" = the last round they reached or are currently competing in
-- "time" = the kickoff time converted to AEST (UTC+10), formatted like "5:00 AM AEST" or "11:00 AM AEST"
-- If the tournament hasn't started yet, return all teams with pts:0, gf:0, ga:0, gd:0, round:"Group Stage"
-- Return data for ALL ${ALL_TEAMS.length} teams listed above`;
+- Include all group stage matches plus any knockout matches played
+- If the tournament hasn't started yet, return all teams with pts:0, gf:0, ga:0, gd:0, round:"Group Stage", eliminated:false
+- Return data for ALL ${ALL_TEAMS.length} teams listed above
+
+IMPORTANT: Your final response must be ONLY the JSON object, with no other text before or after it.`;
 
   const response = await anthropic.messages.create({
     model: 'claude-opus-4-5',
@@ -88,34 +91,34 @@ Rules:
     messages: [{ role: 'user', content: prompt }],
   });
 
- // Extract the LAST text block — Claude may produce several while searching,
-// the final one should contain the JSON
-const textBlocks = response.content.filter(b => b.type === 'text');
-if (!textBlocks.length) throw new Error('No text response from Claude');
-const textBlock = textBlocks[textBlocks.length - 1];
+  // Extract the LAST text block — Claude may produce several while searching,
+  // the final one should contain the JSON
+  const textBlocks = response.content.filter(b => b.type === 'text');
+  if (!textBlocks.length) throw new Error('No text response from Claude');
+  const textBlock = textBlocks[textBlocks.length - 1];
 
-// Strip any accidental markdown fences
-const cleaned = textBlock.text.replace(/```json|```/g, '').trim();
+  // Strip any accidental markdown fences
+  const cleaned = textBlock.text.replace(/```json|```/g, '').trim();
 
-let parsed;
-try {
-  // Find the first '{' and walk forward tracking brace depth to find its match
-  const start = cleaned.indexOf('{');
-  if (start === -1) throw new Error('No JSON object found');
-  let depth = 0, end = -1;
-  for (let i = start; i < cleaned.length; i++) {
-    if (cleaned[i] === '{') depth++;
-    else if (cleaned[i] === '}') {
-      depth--;
-      if (depth === 0) { end = i; break; }
+  let parsed;
+  try {
+    // Find the first '{' and walk forward tracking brace depth to find its match
+    const start = cleaned.indexOf('{');
+    if (start === -1) throw new Error('No JSON object found');
+    let depth = 0, end = -1;
+    for (let i = start; i < cleaned.length; i++) {
+      if (cleaned[i] === '{') depth++;
+      else if (cleaned[i] === '}') {
+        depth--;
+        if (depth === 0) { end = i; break; }
+      }
     }
+    if (end === -1) throw new Error('No matching closing brace found');
+    parsed = JSON.parse(cleaned.slice(start, end + 1));
+  } catch (e) {
+    console.error('Failed to parse Claude response:', cleaned.slice(0, 1000));
+    parsed = {};
   }
-  if (end === -1) throw new Error('No matching closing brace found');
-  parsed = JSON.parse(cleaned.slice(start, end + 1));
-} catch (e) {
-  console.error('Failed to parse Claude response:', cleaned.slice(0, 1000));
-  parsed = {};
-}
 
   return parsed;
 }
@@ -139,20 +142,20 @@ function normalise(rawData) {
     const gf    = typeof raw.gf  === 'number' ? raw.gf  : 0;
     const ga    = typeof raw.ga  === 'number' ? raw.ga  : 0;
     const gd    = gf - ga;
+    const eliminated = !!raw.eliminated;
 
-  const fixtures = Array.isArray(raw.fixtures)
-  ? raw.fixtures.map(f => ({
-      date:     f.date     || '',
-      time:     f.time     || '',
-      opponent: f.opponent || '',
-      score:    f.score    || null,
-      upcoming: !!f.upcoming,
-    }))
-  : [];
+    const fixtures = Array.isArray(raw.fixtures)
+      ? raw.fixtures.map(f => ({
+          date:     f.date     || '',
+          time:     f.time     || '',
+          opponent: f.opponent || '',
+          score:    f.score    || null,
+          upcoming: !!f.upcoming,
+        }))
+      : [];
 
-const eliminated = !!raw.eliminated;
-
-result[team] = { pts, gf, ga, gd, round, eliminated, fixtures };
+    result[team] = { pts, gf, ga, gd, round, eliminated, fixtures };
+  }
 
   return result;
 }
@@ -162,17 +165,17 @@ result[team] = { pts, gf, ga, gd, round, eliminated, fixtures };
 async function writeToSupabase(data) {
   console.log('📝 Writing results to Supabase...');
 
- const rows = Object.entries(data).map(([team, stats]) => ({
-  team,
-  pts:        stats.pts,
-  gf:         stats.gf,
-  ga:         stats.ga,
-  gd:         stats.gd,
-  round:      stats.round,
-  eliminated: stats.eliminated,
-  fixtures:   stats.fixtures,
-  updated_at: new Date().toISOString(),
-}));
+  const rows = Object.entries(data).map(([team, stats]) => ({
+    team,
+    pts:        stats.pts,
+    gf:         stats.gf,
+    ga:         stats.ga,
+    gd:         stats.gd,
+    round:      stats.round,
+    eliminated: stats.eliminated,
+    fixtures:   stats.fixtures,
+    updated_at: new Date().toISOString(),
+  }));
 
   const { error } = await supabase
     .from('team_stats')
