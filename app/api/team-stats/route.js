@@ -15,21 +15,22 @@ export async function GET() {
     const statsMap = {};
     (data || []).forEach(row => {
       statsMap[row.team] = {
-        pts: row.pts ?? 0,
-        gf: row.gf ?? 0,
-        ga: row.ga ?? 0,
-        gd: row.gd ?? 0,
-        round: row.round ?? 'Group Stage',
-        fixtures: row.fixtures ?? [],
-      };
+  pts: row.pts ?? 0,
+  gf: row.gf ?? 0,
+  ga: row.ga ?? 0,
+  gd: row.gd ?? 0,
+  round: row.round ?? 'Group Stage',
+  eliminated: row.eliminated ?? false,
+  fixtures: row.fixtures ?? [],
+};
     });
 
     // Fill in any missing teams with defaults
-    ALL_TEAMS.forEach(team => {
-      if (!statsMap[team]) {
-        statsMap[team] = { pts: 0, gf: 0, ga: 0, gd: 0, round: 'Group Stage', fixtures: [] };
-      }
-    });
+ALL_TEAMS.forEach(team => {
+  if (!statsMap[team]) {
+    statsMap[team] = { pts: 0, gf: 0, ga: 0, gd: 0, round: 'Group Stage', eliminated: false, fixtures: [] };
+  }
+});
 
     return Response.json({
       stats: statsMap,
