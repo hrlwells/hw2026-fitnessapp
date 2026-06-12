@@ -80,17 +80,19 @@ Rules:
 
   const response = await anthropic.messages.create({
     model: 'claude-opus-4-5',
-    max_tokens: 8000,
+    max_tokens: 16000,
     tools: [{ type: 'web_search_20250305', name: 'web_search' }],
     messages: [{ role: 'user', content: prompt }],
   });
 
-  // Extract the final text response (after tool use)
-  const textBlock = response.content.find(b => b.type === 'text');
-  if (!textBlock) throw new Error('No text response from Claude');
+ // Extract the LAST text block — Claude may produce several while searching,
+// the final one should contain the JSON
+const textBlocks = response.content.filter(b => b.type === 'text');
+if (!textBlocks.length) throw new Error('No text response from Claude');
+const textBlock = textBlocks[textBlocks.length - 1];
 
-  // Strip any accidental markdown fences
-  const cleaned = textBlock.text.replace(/```json|```/g, '').trim();
+// Strip any accidental markdown fences
+const cleaned = textBlock.text.replace(/```json|```/g, '').trim();
 
 let parsed;
 try {
