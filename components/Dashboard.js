@@ -15,7 +15,7 @@ const TABS = ['Leaderboard', 'All Draws', 'Top Teams', 'Regular Teams', 'Low Ran
 function flag(t) { return FLAGS[t] || '🏳️'; }
 
 function getStats(team, teamStats) {
-  return teamStats[team] || { pts: 0, gf: 0, ga: 0, gd: 0, round: 'Group Stage', fixtures: [] };
+  return teamStats[team] || { pts: 0, gf: 0, ga: 0, gd: 0, round: 'Group Stage', eliminated: false, fixtures: [] };
 }
 
 function getRoundScore(team, teamStats) {
