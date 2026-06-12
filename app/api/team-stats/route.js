@@ -1,7 +1,7 @@
 import { supabase } from '../../../lib/supabase';
 import { ALL_TEAMS } from '../../../lib/data';
 
-export const revalidate = 3600; // ISR: revalidate every hour
+export const revalidate = 0; // ISR: revalidate every hour
 
 export async function GET() {
   try {
