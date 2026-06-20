@@ -50,12 +50,14 @@ const NAME_MAP = {
   "DR Congo": "DR Congo",
   "Congo DR": "DR Congo",
   "Democratic Republic of Congo": "DR Congo",
-  "Bosnia and Herzegovina": "Bosnia & Herzegovina",
+ "Bosnia and Herzegovina": "Bosnia & Herzegovina",
   "Bosnia & Herzegovina": "Bosnia & Herzegovina",
+  "Bosnia-Herzegovina": "Bosnia & Herzegovina",
   "Curaçao": "Curacao",
   "Curacao": "Curacao",
-  "Cabo Verde": "Cape Verde",
+"Cabo Verde": "Cape Verde",
   "Cape Verde": "Cape Verde",
+  "Cape Verde Islands": "Cape Verde",
 };
 
 // Map football-data.org knockout stage names → our round labels
