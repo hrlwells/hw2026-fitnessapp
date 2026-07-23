@@ -8,11 +8,15 @@ export const dynamic = 'force-dynamic';
 export async function GET() {
   const sb = serviceClient();
   const { data, error } = await sb
-    .from('fitness_log').select('log_date, data').order('log_date', { ascending: true });
+    .from('fitness_log').select('log_date, data, updated_at').order('log_date', { ascending: true });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   const logs = {};
-  for (const row of data || []) logs[row.log_date] = row.data || {};
-  return NextResponse.json({ logs });
+  let lastSaved = null;
+  for (const row of data || []) {
+    logs[row.log_date] = row.data || {};
+    if (row.updated_at && (!lastSaved || row.updated_at > lastSaved)) lastSaved = row.updated_at;
+  }
+  return NextResponse.json({ logs, lastSaved });
 }
 
 export async function POST(request) {
