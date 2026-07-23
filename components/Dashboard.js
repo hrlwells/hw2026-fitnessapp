@@ -1,6 +1,7 @@
 "use client";
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { getWorkout } from "@/lib/workouts";
+import { supabase } from "@/lib/supabase";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, ResponsiveContainer,
 } from "recharts";
@@ -212,15 +213,28 @@ const DEFAULT_PROFILE = {
   fivekBase: 27.5,
   pushupBase: 30,
 };
+// The signed-in user's access token, attached to every API call.
+let authToken = null;
+export function setAuthToken(t) { authToken = t; }
+const authHeaders = (extra) => ({
+  ...(extra || {}),
+  ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+});
+
 // Load profile + all day logs from Supabase (via our API routes).
 async function loadState() {
   try {
     const [pRes, lRes] = await Promise.all([
-      fetch("/api/profile", { cache: "no-store" }),
-      fetch("/api/log", { cache: "no-store" }),
+      fetch("/api/profile", { cache: "no-store", headers: authHeaders() }),
+      fetch("/api/log", { cache: "no-store", headers: authHeaders() }),
     ]);
     const pJson = await pRes.json();
     const lJson = await lRes.json();
+    // Don't silently show an empty program if the server refused us.
+    if (!pRes.ok || !lRes.ok || pJson.error || lJson.error) {
+      console.error("load rejected", pJson.error || lJson.error);
+      return null;
+    }
     return {
       profile: pJson.profile || DEFAULT_PROFILE,
       days: lJson.logs || {},
@@ -236,7 +250,7 @@ async function persistDay(date, dayObj) {
   try {
     const r = await fetch("/api/log", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ log_date: date, data: dayObj }),
     });
     if (!r.ok) { console.error("save day failed", r.status); return false; }
@@ -249,7 +263,7 @@ async function persistProfile(profileObj) {
   try {
     const r = await fetch("/api/profile", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ data: profileObj }),
     });
     if (!r.ok) { console.error("save profile failed", r.status); return false; }
@@ -283,6 +297,76 @@ function kindChip(week) {
   return <Chip bg={C.brassSoft} fg={C.brass}>Build</Chip>;
 }
 
+/* ---------------------------------------------------------------- sign in */
+function SignIn() {
+  const [email, setEmail] = useState("");
+  const [sent, setSent] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+
+  const send = async () => {
+    const addr = email.trim();
+    if (!addr) return;
+    setBusy(true); setErr(null);
+    const { error } = await supabase.auth.signInWithOtp({
+      email: addr,
+      options: { emailRedirectTo: typeof window !== "undefined" ? window.location.origin : undefined },
+    });
+    setBusy(false);
+    if (error) setErr(error.message); else setSent(true);
+  };
+
+  return (
+    <div style={{ background: C.paper, minHeight: "100vh", fontFamily: sans, color: C.ink, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <style>{FONTS}</style>
+      <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 18, padding: "30px 26px", maxWidth: 380, width: "100%" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <div>
+            <div style={{ fontFamily: mono, fontSize: 11, letterSpacing: 2, color: C.brass, textTransform: "uppercase" }}>The build to 21 Nov</div>
+            <h1 style={{ fontFamily: serif, fontWeight: 600, fontSize: 24, lineHeight: 1.1, margin: "6px 0 0" }}>Wedding-prep tracker</h1>
+          </div>
+          <Sparkles size={20} color={C.brass} style={{ marginTop: 4, flexShrink: 0 }} />
+        </div>
+
+        {sent ? (
+          <div style={{ marginTop: 20 }}>
+            <div style={{ background: C.greenSoft, color: C.green, borderRadius: 12, padding: "12px 14px", fontSize: 13.5, lineHeight: 1.5 }}>
+              <b>Check your email.</b> Tap the link we just sent and you'll be signed in on this device — you won't need to do this again here.
+            </div>
+            <button
+              onClick={() => { setSent(false); setErr(null); }}
+              style={{ marginTop: 14, background: "none", border: "none", color: C.slate, fontFamily: sans, fontSize: 12.5, cursor: "pointer", textDecoration: "underline", padding: 0 }}
+            >Use a different email</button>
+          </div>
+        ) : (
+          <div style={{ marginTop: 20 }}>
+            <div style={{ fontSize: 13.5, color: C.slate, lineHeight: 1.5 }}>
+              Enter your email and we'll send a sign-in link. No password to remember.
+            </div>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") send(); }}
+              placeholder="you@example.com"
+              autoComplete="email"
+              style={{ width: "100%", marginTop: 14, padding: "12px 14px", borderRadius: 11, border: `1px solid ${C.line}`, background: C.paper, fontFamily: sans, fontSize: 15, color: C.ink, outline: "none", boxSizing: "border-box" }}
+            />
+            <button
+              onClick={send}
+              disabled={busy || !email.trim()}
+              style={{ width: "100%", marginTop: 10, padding: "12px 14px", borderRadius: 11, border: "none", background: busy || !email.trim() ? C.line : C.ink, color: busy || !email.trim() ? C.faint : C.paper, fontFamily: sans, fontWeight: 600, fontSize: 14.5, cursor: busy || !email.trim() ? "default" : "pointer" }}
+            >{busy ? "Sending…" : "Send me a link"}</button>
+            {err && (
+              <div style={{ marginTop: 12, background: C.berrySoft, color: C.berry, borderRadius: 10, padding: "9px 12px", fontSize: 12.5, lineHeight: 1.4 }}>{err}</div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ---------------------------------------------------------------- app */
 export default function App() {
   const todayStr = toStr(new Date());
@@ -297,15 +381,32 @@ export default function App() {
   const [saveState, setSaveState] = useState("idle");
   const [lastSaved, setLastSaved] = useState(null);
   const [loadFailed, setLoadFailed] = useState(false);
+  // auth: undefined = still checking, null = signed out, object = signed in
+  const [session, setSession] = useState(undefined);
 
+  // Watch the Supabase session (survives reloads; refreshes itself).
   useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      setAuthToken(data.session ? data.session.access_token : null);
+      setSession(data.session || null);
+    });
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => {
+      setAuthToken(s ? s.access_token : null);
+      setSession(s || null);
+    });
+    return () => { if (sub && sub.subscription) sub.subscription.unsubscribe(); };
+  }, []);
+
+  // Load data only once signed in.
+  useEffect(() => {
+    if (!session) return;
     (async () => {
       const loaded = await loadState();
       if (!loaded) setLoadFailed(true);
       setState(loaded || { profile: DEFAULT_PROFILE, days: {} });
       if (loaded && loaded.lastSaved) setLastSaved(loaded.lastSaved);
     })();
-  }, []);
+  }, [session]);
 
   // Run a save, reporting status to the indicator.
   const runSave = async (fn) => {
@@ -328,8 +429,13 @@ export default function App() {
     saveTimers.current["profile"] = setTimeout(() => runSave(() => persistProfile(profileObj)), 500);
   };
 
+  if (session === undefined) {
+    return <div style={{ background: C.paper, minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: sans, color: C.slate }}><style>{FONTS}</style>Checking your sign-in…</div>;
+  }
+  if (session === null) return <SignIn />;
+
   if (!state) {
-    return <div style={{ background: C.paper, minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: sans, color: C.slate }}>Loading your program…</div>;
+    return <div style={{ background: C.paper, minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: sans, color: C.slate }}><style>{FONTS}</style>Loading your program…</div>;
   }
 
   const P = state.profile;
@@ -359,7 +465,7 @@ export default function App() {
   });
   const resetAll = async () => {
     try {
-      await fetch("/api/log", { method: "DELETE" });
+      await fetch("/api/log", { method: "DELETE", headers: authHeaders() });
       await persistProfile(DEFAULT_PROFILE);
     } catch (e) { console.error("reset failed", e); }
     setState({ profile: DEFAULT_PROFILE, days: {} });
@@ -803,6 +909,12 @@ function SetupView({ P, setProfile, proteinTarget, resetAll }) {
         onClick={() => { if (confirm("Clear all logged data and reset to placeholder baselines? This can't be undone.")) resetAll(); }}
         style={{ marginTop: 22, width: "100%", background: "none", border: `1px solid ${C.line}`, borderRadius: 12, padding: "12px", color: C.berry, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
         Reset all data
+      </button>
+
+      <button
+        onClick={() => { if (confirm("Sign out on this device? You'll need a new email link to get back in.")) supabase.auth.signOut(); }}
+        style={{ marginTop: 10, width: "100%", background: "none", border: `1px solid ${C.line}`, borderRadius: 12, padding: "12px", color: C.slate, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+        Sign out
       </button>
     </div>
   );
