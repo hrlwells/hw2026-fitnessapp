@@ -1,11 +1,12 @@
-// GET  /api/log      -> { logs: { "YYYY-MM-DD": {day obj}, ... } }
-// POST /api/log      -> upsert one day: { log_date, data:{...} }
-import { serviceClient } from '@/lib/supabase';
+import { serviceClient, requireUser } from '@/lib/supabase';
 import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+const denied = () => NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+
+export async function GET(request) {
+  if (!(await requireUser(request))) return denied();
   const sb = serviceClient();
   const { data, error } = await sb
     .from('fitness_log').select('log_date, data, updated_at').order('log_date', { ascending: true });
@@ -20,6 +21,7 @@ export async function GET() {
 }
 
 export async function POST(request) {
+  if (!(await requireUser(request))) return denied();
   const sb = serviceClient();
   const body = await request.json();
   if (!body.log_date) {
@@ -33,8 +35,8 @@ export async function POST(request) {
   return NextResponse.json({ ok: true });
 }
 
-// DELETE /api/log -> wipe all day logs (used by the Setup "reset" button).
-export async function DELETE() {
+export async function DELETE(request) {
+  if (!(await requireUser(request))) return denied();
   const sb = serviceClient();
   const { error } = await sb.from('fitness_log').delete().neq('log_date', '1900-01-01');
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
