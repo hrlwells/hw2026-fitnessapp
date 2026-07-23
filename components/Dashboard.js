@@ -224,31 +224,48 @@ async function loadState() {
     return {
       profile: pJson.profile || DEFAULT_PROFILE,
       days: lJson.logs || {},
+      lastSaved: lJson.lastSaved || null,
     };
   } catch (e) {
     console.error("load failed", e);
     return null;
   }
 }
-// Persist a single day's log (debounced by the caller).
+// Persist a single day's log (debounced by the caller). Returns true on success.
 async function persistDay(date, dayObj) {
   try {
-    await fetch("/api/log", {
+    const r = await fetch("/api/log", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ log_date: date, data: dayObj }),
     });
-  } catch (e) { console.error("save day failed", e); }
+    if (!r.ok) { console.error("save day failed", r.status); return false; }
+    const j = await r.json().catch(() => ({}));
+    return !j.error;
+  } catch (e) { console.error("save day failed", e); return false; }
 }
-// Persist the profile.
+// Persist the profile. Returns true on success.
 async function persistProfile(profileObj) {
   try {
-    await fetch("/api/profile", {
+    const r = await fetch("/api/profile", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ data: profileObj }),
     });
-  } catch (e) { console.error("save profile failed", e); }
+    if (!r.ok) { console.error("save profile failed", r.status); return false; }
+    const j = await r.json().catch(() => ({}));
+    return !j.error;
+  } catch (e) { console.error("save profile failed", e); return false; }
+}
+// Friendly "last saved" formatting, e.g. "today 1:14 pm" / "23 Jul, 1:14 pm".
+function fmtSaved(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (isNaN(d)) return null;
+  const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).toLowerCase();
+  const sameDay = toStr(d) === toStr(new Date());
+  if (sameDay) return `today ${time}`;
+  return `${d.toLocaleDateString([], { day: "numeric", month: "short" })}, ${time}`;
 }
 
 /* ---------------------------------------------------------------- ui bits */
@@ -276,20 +293,39 @@ export default function App() {
   const [weekAnchor, setWeekAnchor] = useState(firstProgramMon);
 
   const saveTimers = useRef({});
+  // "idle" | "saving" | "saved" | "error"
+  const [saveState, setSaveState] = useState("idle");
+  const [lastSaved, setLastSaved] = useState(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+
   useEffect(() => {
     (async () => {
       const loaded = await loadState();
+      if (!loaded) setLoadFailed(true);
       setState(loaded || { profile: DEFAULT_PROFILE, days: {} });
+      if (loaded && loaded.lastSaved) setLastSaved(loaded.lastSaved);
     })();
   }, []);
+
+  // Run a save, reporting status to the indicator.
+  const runSave = async (fn) => {
+    setSaveState("saving");
+    const ok = await fn();
+    if (ok) {
+      setLastSaved(new Date().toISOString());
+      setSaveState("saved");
+    } else {
+      setSaveState("error");
+    }
+  };
   // Debounced persistence helpers (avoid a write on every keystroke).
   const scheduleDaySave = (date, dayObj) => {
     clearTimeout(saveTimers.current["day:" + date]);
-    saveTimers.current["day:" + date] = setTimeout(() => persistDay(date, dayObj), 500);
+    saveTimers.current["day:" + date] = setTimeout(() => runSave(() => persistDay(date, dayObj)), 500);
   };
   const scheduleProfileSave = (profileObj) => {
     clearTimeout(saveTimers.current["profile"]);
-    saveTimers.current["profile"] = setTimeout(() => persistProfile(profileObj), 500);
+    saveTimers.current["profile"] = setTimeout(() => runSave(() => persistProfile(profileObj)), 500);
   };
 
   if (!state) {
@@ -342,6 +378,27 @@ export default function App() {
               <h1 style={{ fontFamily: serif, fontWeight: 600, fontSize: 26, lineHeight: 1.05, margin: "6px 0 0" }}>{P.name}'s wedding-prep tracker</h1>
             </div>
             <Sparkles size={22} color={C.brass} style={{ marginTop: 4, flexShrink: 0 }} />
+          </div>
+
+          {/* save status — confirms every change reached the database */}
+          <div style={{ marginTop: 12 }}>
+            {saveState === "error" || loadFailed ? (
+              <div style={{ background: C.berrySoft, color: C.berry, border: `1px solid ${C.berry}33`, borderRadius: 10, padding: "9px 12px", fontSize: 12.5, lineHeight: 1.4 }}>
+                <b>{loadFailed ? "Couldn't load your saved data." : "Not saved."}</b>{" "}
+                {loadFailed
+                  ? "You may be offline. Don't log anything yet — reload the page first."
+                  : "That change didn't reach the database. Check your connection and try again."}
+              </div>
+            ) : (
+              <div style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: mono, fontSize: 10.5, letterSpacing: 0.5, textTransform: "uppercase", color: saveState === "saved" ? C.green : C.faint }}>
+                <span style={{ width: 7, height: 7, borderRadius: 999, background: saveState === "saving" ? C.brass : saveState === "saved" ? C.green : C.line, flexShrink: 0 }} />
+                {saveState === "saving"
+                  ? "Saving…"
+                  : lastSaved
+                    ? `Saved · ${fmtSaved(lastSaved)}`
+                    : "Synced with your database"}
+              </div>
+            )}
           </div>
 
           <div style={{ display: "flex", gap: 12, marginTop: 18, flexWrap: "wrap" }}>
